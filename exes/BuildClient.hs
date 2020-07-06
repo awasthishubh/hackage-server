@@ -488,35 +488,46 @@ buildOnce opts pkgs = keepGoing $ do
         let go :: [DocInfo] -> IO ()
             go [] = return ()
             go (docInfo : toBuild') = do
-              (mTgz, mRpt, logfile) <- buildPackage verbosity opts config docInfo
-              let installOk = fmap ("install-outcome: InstallOk" `isInfixOf`) mRpt == Just True
-              case mTgz of
-                Nothing -> do
-                     mark_as_failed (docInfoPackage docInfo)
-                     -- When it installed ok, but there's no docs, that means it is exe only.
-                     -- This marks it "really failed" in such a case to stop retries.
-                     when installOk . replicateM_ 4 $ mark_as_failed (docInfoPackage docInfo)
-                Just _  -> return ()
-              traverse rewriteReport mRpt
-              case mRpt of
-                Just _  | bo_dryRun opts -> return ()
-                Just report -> uploadResults verbosity config docInfo
-                                              mTgz report logfile
-                _           -> return ()
+              preparePkg opts config docInfo
+              testPackage verbosity opts config docInfo
+              -- (mTgz, mRpt, logfile) <- buildPackage verbosity opts config docInfo
+              -- let installOk = fmap ("install-outcome: InstallOk" `isInfixOf`) mRpt == Just True
+              -- case mTgz of
+              --   Nothing -> do
+              --        mark_as_failed (docInfoPackage docInfo)
+              --        -- When it installed ok, but there's no docs, that means it is exe only.
+              --        -- This marks it "really failed" in such a case to stop retries.
+              --        when installOk . replicateM_ 4 $ mark_as_failed (docInfoPackage docInfo)
+              --   Just _  -> return ()
+              -- traverse rewriteReport mRpt
+              -- case mRpt of
+              --   Just _  | bo_dryRun opts -> return ()
+              --   Just report -> uploadResults verbosity config docInfo
+              --                                 mTgz report logfile
+              --   _           -> return ()
 
-              -- We don't check the runtime until we've actually tried
-              -- to build a doc, so as to ensure we make progress.
-              outOfTime <- case bo_runTime opts of
-                  Nothing -> return False
-                  Just d  -> do
-                    currentTime <- getCurrentTime
-                    return $ (currentTime `diffUTCTime` startTime) > d
+              -- -- We don't check the runtime until we've actually tried
+              -- -- to build a doc, so as to ensure we make progress.
+              -- outOfTime <- case bo_runTime opts of
+              --     Nothing -> return False
+              --     Just d  -> do
+              --       currentTime <- getCurrentTime
+              --       return $ (currentTime `diffUTCTime` startTime) > d
 
-              if outOfTime then return ()
-                           else go toBuild'
+              -- if outOfTime then return ()
+              --              else go toBuild'
 
         go toBuild
   where
+
+    preparePkg :: BuildOpts -> BuildConfig -> DocInfo -> IO ()
+    preparePkg opts config docInfo = do 
+      putStrLn "Writing Cabal.project"
+      let projectFile = installDirectory opts </> "cabal.project"
+      createDirectoryIfMissing True $ installDirectory opts
+      putStrLn projectFile
+      writeFile projectFile $ "packages: " ++ show (docInfoTarGzURI config docInfo)
+      
     shouldBuild :: DocInfo -> Bool
     shouldBuild docInfo =
         case docInfoHasDocs docInfo of
@@ -554,9 +565,135 @@ buildOnce opts pkgs = keepGoing $ do
     verbosity = bo_verbosity opts
 
     updatePackageIndex = do
-      update_ec <- cabal opts "update" [] Nothing
+      update_ec <- cabal opts "update" [] Nothing Nothing
       unless (update_ec == ExitSuccess) $
           dieNoVerbosity "Could not 'cabal update' from specified server"
+
+
+
+testPackage :: Verbosity -> BuildOpts -> BuildConfig
+             -> DocInfo
+             -> IO ()
+testPackage verbosity opts config docInfo = do
+  putStrLn "Testing...."
+  let pkgid = docInfoPackage docInfo
+  notice verbosity ("Testing " ++ display pkgid)
+  -- handleDoesNotExist () $
+  --     removeDirectoryRecursive $ installDirectory opts
+  -- createDirectory $ installDirectory opts
+
+  let pkg_flags = ["all", "--enable-coverage","--disable-optimization"]
+  let testLogFile = (installDirectory opts) </> display pkgid <.> "log"
+  buildLogHnd <- openFile testLogFile WriteMode
+  void $ cabal opts "v2-test" pkg_flags (Just buildLogHnd) $ Just (installDirectory opts)
+
+
+    
+--     -- The documentation is installed within the stateDir because we
+--     -- set a prefix while installing
+--     let doc_root     = installDirectory opts </> "haddocks"
+--         doc_dir_tmpl = doc_root </> "$pkgid-docs"
+--         doc_dir_pkg  = doc_root </> display pkgid ++ "-docs"
+-- --        doc_dir_html = doc_dir </> "html"
+-- --        deps_doc_dir = doc_dir </> "deps"
+-- --        temp_doc_dir = doc_dir </> display (docInfoPackage docInfo) ++ "-docs"
+--         pkg_url      = "/package" </> "$pkg-$version"
+--         pkg_flags    =
+--             ["--enable-documentation",
+--              "--htmldir=" ++ doc_dir_tmpl,
+--              -- We only care about docs, so we want to build as
+--              -- quickly as possible, and hence turn
+--              -- optimisation off. Also explicitly pass -O0 as a
+--              -- GHC option, in case it overrides a .cabal
+--              -- setting or anything
+--              "--enable-tests",
+--              "--run-tests",
+--              "--enable-coverage",
+--              "--disable-optimization", "--ghc-option", "-O0",
+--              "--disable-library-for-ghci",
+--              -- We don't want packages installed in the user
+--              -- package.conf to affect things. In particular,
+--              -- we don't want doc building to fail because
+--              -- "packages are likely to be broken by the reinstalls"
+--              "--package-db=clear", "--package-db=global",
+--              "--package-db=" ++ packageDb,
+--              -- Always build the package, even when it's been built
+--              -- before. This lets us regenerate documentation when
+--              -- dependencies are updated.
+--              "--reinstall", "--force-reinstalls",
+--              -- We know where this documentation will
+--              -- eventually be hosted, bake that in.
+--              -- The wiki claims we shouldn't include the
+--              -- version in the hyperlinks so we don't have
+--              -- to rehaddock some package when the dependent
+--              -- packages get updated. However, this is NOT
+--              -- what the Hackage v1 did, so ignore that:
+--              "--haddock-html-location=" ++ pkg_url </> "docs",
+--              -- Link "Contents" to the package page:
+--              "--haddock-contents-location=" ++ pkg_url,
+--              -- Link to colourised source code:
+--              "--haddock-hyperlink-source",
+--              "--prefix=" ++ installDirectory opts,
+--              "--build-summary=" ++ installDirectory opts </> "reports" </> "$pkgid.report",
+--              "--report-planning-failure",
+--              -- We want both html documentation and hoogle database generated
+--              "--haddock-html",
+--              "--haddock-hoogle",
+--              -- Generate the quickjump index files
+--              "--haddock-option=--quickjump",
+--              -- For candidates we need to use the full URL, because
+--              -- otherwise cabal-install will not find the package.
+--              -- For regular packages however we need to use just the
+--              -- package name, otherwise cabal-install will not
+--              -- generate a report
+--              if docInfoIsCandidate docInfo
+--                then show (docInfoTarGzURI config docInfo)
+--                else display pkgid
+--              ]
+
+--     -- The installDirectory is purely temporary, while the resultsDirectory is
+--     -- more persistent. We will grab various outputs from the tmp dir and stash
+--     -- them for safe keeping (for later upload or manual inspection) in the
+--     -- results dir.
+--     let resultDir         = resultsDirectory opts
+--         resultLogFile     = resultDir </> display pkgid <.> "log"
+--         resultReportFile  = resultDir </> display pkgid <.> "report"
+--         resultDocsTarball = resultDir </> (display pkgid ++ "-docs") <.> "tar.gz"
+
+--     buildLogHnd <- openFile resultLogFile WriteMode
+
+--     -- We ignore the result of calling @cabal install@ because
+--     -- @cabal install@ succeeds even if the documentation fails to build.
+--     void $ cabal opts "v1-install" pkg_flags (Just buildLogHnd)
+
+--     -- Grab the report for the package we want. Stash it for safe keeping.
+--     report <- handleDoesNotExist Nothing $ do
+--                 renameFile (installDirectory opts </> "reports"
+--                                 </> display pkgid <.> "report")
+--                            resultReportFile
+--                 appendFile resultReportFile "\ndoc-builder: True"
+--                 return (Just resultReportFile)
+
+--     docs_generated <- fmap and $ sequence [
+--         doesDirectoryExist doc_dir_pkg,
+--         doesFileExist (doc_dir_pkg </> "doc-index.html"),
+--         doesFileExist (doc_dir_pkg </> display (docInfoPackageName docInfo) <.> "haddock")]
+--     docs <- if docs_generated
+--               then do
+--                 when (bo_prune opts) (pruneHaddockFiles doc_dir_pkg)
+--                 try (tarGzDirectory doc_dir_pkg) >>= either
+--                   (\(e :: SomeException) -> print e >> return Nothing)
+--                   (\x -> BS.writeFile resultDocsTarball x >> return (Just resultDocsTarball))
+--               else return Nothing
+
+--     notice verbosity $ unlines
+--       [ "Build results for " ++ display pkgid ++ ":"
+--       , fromMaybe "no report" report
+--       , fromMaybe "no docs" docs
+--       , resultLogFile
+--       ]
+
+--     return (docs, report, resultLogFile)
 
 -- | Builds a little memoised function that can tell us whether a
 -- particular package failed to build its documentation, a function to mark a
@@ -637,6 +774,9 @@ buildPackage verbosity opts config docInfo = do
              -- optimisation off. Also explicitly pass -O0 as a
              -- GHC option, in case it overrides a .cabal
              -- setting or anything
+             "--enable-tests",
+             "--run-tests",
+             "--enable-coverage",
              "--disable-optimization", "--ghc-option", "-O0",
              "--disable-library-for-ghci",
              -- We don't want packages installed in the user
@@ -692,7 +832,7 @@ buildPackage verbosity opts config docInfo = do
 
     -- We ignore the result of calling @cabal install@ because
     -- @cabal install@ succeeds even if the documentation fails to build.
-    void $ cabal opts "v1-install" pkg_flags (Just buildLogHnd)
+    void $ cabal opts "v1-install" pkg_flags (Just buildLogHnd) Nothing
 
     -- Grab the report for the package we want. Stash it for safe keeping.
     report <- handleDoesNotExist Nothing $ do
@@ -724,8 +864,8 @@ buildPackage verbosity opts config docInfo = do
     return (docs, report, resultLogFile)
 
 
-cabal :: BuildOpts -> String -> [String] -> Maybe Handle -> IO ExitCode
-cabal opts cmd args moutput = do
+cabal :: BuildOpts -> String -> [String] -> Maybe Handle -> Maybe FilePath -> IO ExitCode
+cabal opts cmd args moutput wrkdir = do
     let verbosity = bo_verbosity opts
         cabalConfigFile = bo_stateDir opts </> "cabal-config"
         verbosityArgs = if verbosity == silent
@@ -736,7 +876,9 @@ cabal opts cmd args moutput = do
                  : verbosityArgs
                 ++ args
     info verbosity $ unwords ("cabal":all_args)
-    ph <- runProcess "cabal" all_args Nothing
+    putStrLn $ show $ unwords ("cabal":all_args)
+    putStrLn $ show wrkdir
+    ph <- runProcess "cabal" all_args wrkdir
                      Nothing Nothing moutput moutput
     waitForProcess ph
 
