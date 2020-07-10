@@ -15,7 +15,7 @@ import Distribution.Server.Features.BuildReports.Backup
 import Distribution.Server.Features.BuildReports.State
 import qualified Distribution.Server.Features.BuildReports.BuildReport as BuildReport
 import Distribution.Server.Features.BuildReports.BuildReport (BuildReport(..))
-import Distribution.Server.Features.BuildReports.BuildReports (BuildReports, BuildReportId(..), BuildLog(..))
+import Distribution.Server.Features.BuildReports.BuildReports (BuildReports, BuildReportId(..), BuildCovg(..), BuildLog(..))
 import qualified Distribution.Server.Framework.ResponseContentTypes as Resource
 
 import Distribution.Server.Packages.Types
@@ -26,7 +26,6 @@ import Distribution.Text
 import Distribution.Package
 import Distribution.Version (nullVersion)
 
-import Control.Arrow (second)
 import Data.ByteString.Lazy (toStrict)
 import Data.String (fromString)
 
@@ -38,7 +37,7 @@ data ReportsFeature = ReportsFeature {
     reportsFeatureInterface :: HackageFeature,
 
     packageReports :: DynamicPath -> ([(BuildReportId, BuildReport)] -> ServerPartE Response) -> ServerPartE Response,
-    packageReport  :: DynamicPath -> ServerPartE (BuildReportId, BuildReport, Maybe BuildLog),
+    packageReport  :: DynamicPath -> ServerPartE (BuildReportId, BuildReport, Maybe BuildLog, Maybe BuildCovg),
 
     queryPackageReports :: forall m. MonadIO m => PackageId -> m [(BuildReportId, BuildReport)],
     queryBuildLog       :: forall m. MonadIO m => BuildLog  -> m Resource.BuildLog,
@@ -163,7 +162,7 @@ buildReportsFeature name
           guardValidPackageId pkgid
           queryPackageReports pkgid >>= continue
 
-    packageReport :: DynamicPath -> ServerPartE (BuildReportId, BuildReport, Maybe BuildLog)
+    packageReport :: DynamicPath -> ServerPartE (BuildReportId, BuildReport, Maybe BuildLog, Maybe BuildCovg)
     packageReport dpath = do
       pkgid <- packageInPath dpath
       guardValidPackageId pkgid
@@ -171,12 +170,12 @@ buildReportsFeature name
       mreport  <- queryState reportsState $ LookupReport pkgid reportId
       case mreport of
         Nothing -> errNotFound "Report not found" [MText "Build report does not exist"]
-        Just (report, mlog) -> return (reportId, report, mlog)
+        Just (report, mlog, covg) -> return (reportId, report, mlog, covg)
 
     queryPackageReports :: MonadIO m => PackageId -> m [(BuildReportId, BuildReport)]
     queryPackageReports pkgid = do
         reports <- queryState reportsState $ LookupPackageReports pkgid
-        return $ map (second fst) reports
+        return $ map (\(a, (b, _, _)) -> (a,b)) reports
 
     queryBuildLog :: MonadIO m => BuildLog -> m Resource.BuildLog
     queryBuildLog (BuildLog blobId) = do
@@ -188,13 +187,13 @@ buildReportsFeature name
     textPackageReports dpath = packageReports dpath $ return . toResponse . show
 
     textPackageReport dpath = do
-      (_, report, _) <- packageReport dpath
+      (_, report, _, _) <- packageReport dpath
       return . toResponse $ BuildReport.show report
 
     -- result: not-found error or text file
     serveBuildLog :: DynamicPath -> ServerPartE Response
     serveBuildLog dpath = do
-      (repid, _, mlog) <- packageReport dpath
+      (repid, _, mlog, _) <- packageReport dpath
       case mlog of
         Nothing -> errNotFound "Log not found" [MText $ "Build log for report " ++ display repid ++ " not found"]
         Just logId -> do
@@ -215,7 +214,7 @@ buildReportsFeature name
                   -- Check that the submitter can actually upload docs
                   guardAuthorisedAsMaintainerOrTrustee (packageName pkgid)
               report' <- liftIO $ BuildReport.affixTimestamp report
-              reportId <- updateState reportsState $ AddReport pkgid (report', Nothing)
+              reportId <- updateState reportsState $ AddReport pkgid (report', Nothing, Nothing)
               -- redirect to new reports page
               seeOther (reportsPageUri reportsResource "" pkgid reportId) $ toResponse ()
 
@@ -288,7 +287,7 @@ buildReportsFeature name
                   -- Check that the submitter can actually upload docs
                   guardAuthorisedAsMaintainerOrTrustee (packageName pkgid)
               report' <- liftIO $ BuildReport.affixTimestamp report
-              reportId <- updateState reportsState $ AddReport pkgid (report', Nothing)
+              reportId <- updateState reportsState $ AddReport pkgid (report', Nothing, Nothing)
       
               -- Upload BuildLog if exists
               case logBody of
