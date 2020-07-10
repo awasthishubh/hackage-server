@@ -981,7 +981,7 @@ mkHtmlReports HtmlUtilities{..} CoreFeature{..} ReportsFeature{..} templates = H
 
     servePackageReport :: DynamicPath -> ServerPartE Response
     servePackageReport dpath = do
-        (repid, report, mlog) <- packageReport dpath
+        (repid, report, mlog, _) <- packageReport dpath
         mlog' <- traverse queryBuildLog mlog
         pkgid <- packageInPath dpath
         cacheControlWithoutETag [Public, maxAgeDays 30]

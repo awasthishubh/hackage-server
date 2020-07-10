@@ -8,7 +8,7 @@ module Distribution.Server.Features.BuildReports.Backup (
 
 import Distribution.Server.Features.BuildReports.BuildReport (BuildReport)
 import qualified Distribution.Server.Features.BuildReports.BuildReport as Report
-import Distribution.Server.Features.BuildReports.BuildReports (BuildReports(..), PkgBuildReports(..), BuildReportId(..), BuildLog(..))
+import Distribution.Server.Features.BuildReports.BuildReports (BuildReports(..), BuildCovg(..), PkgBuildReports(..), BuildReportId(..), BuildLog(..))
 import qualified Distribution.Server.Features.BuildReports.BuildReports as Reports
 
 import qualified Distribution.Server.Framework.BlobStorage as BlobStorage
@@ -75,7 +75,7 @@ importReport pkgId repIdStr contents buildReps partialLogs = do
   reportId <- parseText "report id" repIdStr
   report   <- either fail return $ Report.parse (toStrict contents)
   let (mlog, partialLogs') = Map.updateLookupWithKey (\_ _ -> Nothing) (pkgId, reportId) partialLogs
-      buildReps' = Reports.unsafeSetReport pkgId reportId (report, mlog) buildReps --doesn't check for duplicates
+      buildReps' = Reports.unsafeSetReport pkgId reportId (report, mlog, Nothing) buildReps --doesn't check for duplicates
   return (buildReps', partialLogs')
 
 importLog :: PackageId -> String -> BlobStorage.BlobId -> BuildReports -> PartialLogs -> Restore (BuildReports, PartialLogs)
@@ -94,8 +94,8 @@ packageReportsToExport :: PackageId -> PkgBuildReports -> [BackupEntry]
 packageReportsToExport pkgId pkgReports = concatMap (uncurry $ reportToExport prefix) (Map.toList $ Reports.reports pkgReports)
     where prefix = ["package", display pkgId]
 
-reportToExport :: [FilePath] -> BuildReportId -> (BuildReport, Maybe BuildLog) -> [BackupEntry]
-reportToExport prefix reportId (report, mlog) = BackupByteString (getPath ".txt") (packUTF8 $ Report.show report) :
+reportToExport :: [FilePath] -> BuildReportId -> (BuildReport, Maybe BuildLog, Maybe BuildCovg ) -> [BackupEntry]
+reportToExport prefix reportId (report, mlog, _) = BackupByteString (getPath ".txt") (packUTF8 $ Report.show report) :
     case mlog of Nothing -> []; Just (BuildLog blobId) -> [blobToBackup (getPath ".log") blobId]
   where
     getPath ext = prefix ++ [display reportId ++ ext]

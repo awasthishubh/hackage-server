@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Distribution.Server.Features.BuildReports.State where
 
-import Distribution.Server.Features.BuildReports.BuildReports (BuildReportId, BuildLog, BuildReport, BuildReports)
+import Distribution.Server.Features.BuildReports.BuildReports (BuildReportId, BuildLog, BuildCovg, BuildReport, BuildReports)
 import qualified Distribution.Server.Features.BuildReports.BuildReports as BuildReports
 
 import Distribution.Package
@@ -17,7 +17,7 @@ initialBuildReports :: BuildReports
 initialBuildReports = BuildReports.emptyReports
 
 -- and defined methods
-addReport :: PackageId -> (BuildReport, Maybe BuildLog) -> Update BuildReports BuildReportId
+addReport :: PackageId -> (BuildReport, Maybe BuildLog, Maybe BuildCovg ) -> Update BuildReports BuildReportId
 addReport pkgid report = do
     buildReports <- State.get
     let (reports, reportId) = BuildReports.addReport pkgid report buildReports
@@ -38,10 +38,10 @@ deleteReport pkgid reportId = do
         Nothing -> return False
         Just reports -> State.put reports >> return True
 
-lookupReport :: PackageId -> BuildReportId -> Query BuildReports (Maybe (BuildReport, Maybe BuildLog))
+lookupReport :: PackageId -> BuildReportId -> Query BuildReports (Maybe (BuildReport, Maybe BuildLog, Maybe BuildCovg))
 lookupReport pkgid reportId = asks (BuildReports.lookupReport pkgid reportId)
 
-lookupPackageReports :: PackageId -> Query BuildReports [(BuildReportId, (BuildReport, Maybe BuildLog))]
+lookupPackageReports :: PackageId -> Query BuildReports [(BuildReportId, (BuildReport, Maybe BuildLog, Maybe BuildCovg))]
 lookupPackageReports pkgid = asks (BuildReports.lookupPackageReports pkgid)
 
 getBuildReports :: Query BuildReports BuildReports
