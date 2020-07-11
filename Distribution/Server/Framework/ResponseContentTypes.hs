@@ -176,11 +176,11 @@ instance ToMessage CabalFile where
       , ("Last-modified", formatLastModifiedTime time)
       ]
 
-newtype BuildLog = BuildLog BS.Lazy.ByteString
+newtype BuildContent = BuildContent BS.Lazy.ByteString
 
-instance ToMessage BuildLog where
+instance ToMessage BuildContent where
     toContentType _ = "text/plain"
-    toMessage (BuildLog bs) = bs
+    toMessage (BuildContent bs) = bs
 
 instance ToMessage RSS where
     toContentType _ = "application/rss+xml"

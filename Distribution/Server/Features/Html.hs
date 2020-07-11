@@ -35,6 +35,7 @@ import Distribution.Server.Features.UserDetails
 import Distribution.Server.Features.EditCabalFiles
 import Distribution.Server.Features.Html.HtmlUtilities
 import Distribution.Server.Features.Security.SHA256
+import Distribution.Server.Features.BuildReports.BuildReports (BuildCovg(..), BuildLog(..))
 
 import Distribution.Server.Users.Types
 import qualified Distribution.Server.Users.Group as Group
@@ -79,7 +80,7 @@ import qualified Network.URI as URI
 import Text.XHtml.Strict
 import qualified Text.XHtml.Strict as XHtml
 import Text.XHtml.Table (simpleTable)
-
+import Debug.Trace
 
 -- TODO: move more of the below to Distribution.Server.Pages.*, it's getting
 -- close to 1K lines, way too much... it's okay to keep data-querying in here,
@@ -981,8 +982,9 @@ mkHtmlReports HtmlUtilities{..} CoreFeature{..} ReportsFeature{..} templates = H
 
     servePackageReport :: DynamicPath -> ServerPartE Response
     servePackageReport dpath = do
-        (repid, report, mlog, _) <- packageReport dpath
-        mlog' <- traverse queryBuildLog mlog
+        (repid, report, mlog, covg) <- packageReport dpath
+        mlog' <- traverse (\(BuildLog blob) -> queryContent blob) mlog --(trace (show covg) covg)
+        covg'  <- traverse (\(BuildCovg blob) -> queryContent blob) covg
         pkgid <- packageInPath dpath
         cacheControlWithoutETag [Public, maxAgeDays 30]
         template <- getTemplate templates "report.html"
@@ -990,6 +992,7 @@ mkHtmlReports HtmlUtilities{..} CoreFeature{..} ReportsFeature{..} templates = H
           [ "pkgid" $= (pkgid :: PackageIdentifier)
           , "report" $= (repid, report)
           , "log" $= toMessage <$> mlog'
+          , "covg" $= toMessage <$> covg'
           ]
 
 {-------------------------------------------------------------------------------
