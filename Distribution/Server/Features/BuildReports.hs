@@ -5,7 +5,7 @@ module Distribution.Server.Features.BuildReports (
     initBuildReportsFeature
   ) where
 
-import Distribution.Server.Framework hiding (BuildLog)
+import Distribution.Server.Framework hiding (BuildLog, BuildCovg)
 
 import Distribution.Server.Features.Users
 import Distribution.Server.Features.Upload
@@ -41,6 +41,7 @@ data ReportsFeature = ReportsFeature {
 
     queryPackageReports :: forall m. MonadIO m => PackageId -> m [(BuildReportId, BuildReport)],
     queryBuildLog       :: forall m. MonadIO m => BuildLog  -> m Resource.BuildLog,
+    queryBuildCovg       :: forall m. MonadIO m => BuildCovg  -> m Resource.BuildCovg,
 
     reportsResource :: ReportsResource
 }
@@ -181,6 +182,11 @@ buildReportsFeature name
     queryBuildLog (BuildLog blobId) = do
         file <- liftIO $ BlobStorage.fetch store blobId
         return $ Resource.BuildLog file
+
+    queryBuildCovg :: MonadIO m => BuildCovg -> m Resource.BuildCovg
+    queryBuildCovg (BuildCovg blobId) = do
+        file <- liftIO $ BlobStorage.fetch store blobId
+        return $ Resource.BuildCovg file
 
     ---------------------------------------------------------------------------
 
