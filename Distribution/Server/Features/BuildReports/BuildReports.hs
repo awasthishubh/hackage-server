@@ -4,17 +4,24 @@
 module Distribution.Server.Features.BuildReports.BuildReports (
     BuildReport(..),
     BuildReports(..),
+    BuildReports_v2(..),
     BuildReportId(..),
     PkgBuildReports(..),
     BuildLog(..),
     BuildCovg(..),
     emptyReports,
+    emptyReports_v2,
     emptyPkgReports,
     addReport,
+    addReport_v2,
     deleteReport,
+    deleteReport_v2,
     setBuildLog,
+    setBuildLog_v2,
     lookupReport,
+    lookupReport_v2,
     lookupPackageReports,
+    lookupPackageReports_v2,
     unsafeSetReport
   ) where
 
@@ -286,3 +293,46 @@ instance Migrate PkgBuildReports_v2 where
          migrateMap = Map.mapKeys migrate
                     . Map.map (\(br, l) -> (migrate (migrate br),
                                             fmap migrate  l))
+
+emptyReports_v2 :: BuildReports_v2
+emptyReports_v2 = BuildReports_v2 {
+    reportsIndex_v2 = Map.empty
+}
+
+lookupReport_v2 :: PackageId -> BuildReportId -> BuildReports_v2 -> Maybe (BuildReport, Maybe BuildLog )
+lookupReport_v2 pkgid reportId buildReports = Map.lookup reportId . reports_v2 =<< Map.lookup pkgid (reportsIndex_v2 buildReports)
+
+lookupPackageReports_v2 :: PackageId -> BuildReports_v2 -> [(BuildReportId, (BuildReport, Maybe BuildLog))]
+lookupPackageReports_v2 pkgid buildReports = case Map.lookup pkgid (reportsIndex_v2 buildReports) of
+    Nothing -> []
+    Just rs -> Map.toList (reports_v2 rs)
+
+emptyPkgReports_v2 :: PkgBuildReports_v2
+emptyPkgReports_v2 = PkgBuildReports_v2 {
+    reports_v2 = Map.empty,
+    nextReportId_v2 = BuildReportId 1
+}
+
+addReport_v2 :: PackageId -> (BuildReport, Maybe BuildLog ) -> BuildReports_v2 -> (BuildReports_v2, BuildReportId)
+addReport_v2 pkgid report buildReports =
+    let pkgReports  = Map.findWithDefault emptyPkgReports_v2 pkgid (reportsIndex_v2 buildReports)
+        reportId    = nextReportId_v2 pkgReports
+        pkgReports' = PkgBuildReports_v2 { reports_v2 = Map.insert reportId report (reports_v2 pkgReports)
+                                      , nextReportId_v2 = incrementReportId reportId }
+    in (buildReports { reportsIndex_v2 = Map.insert pkgid pkgReports' (reportsIndex_v2 buildReports) }, reportId)
+
+deleteReport_v2 :: PackageId -> BuildReportId -> BuildReports_v2 -> Maybe BuildReports_v2
+deleteReport_v2 pkgid reportId buildReports = case Map.lookup pkgid (reportsIndex_v2 buildReports) of
+    Nothing -> Nothing
+    Just pkgReports -> case Map.lookup reportId (reports_v2 pkgReports) of
+        Nothing -> Nothing
+        Just {} -> let pkgReports' = pkgReports { reports_v2 = Map.delete reportId (reports_v2 pkgReports) }
+                   in Just $ buildReports { reportsIndex_v2 = Map.insert pkgid pkgReports' (reportsIndex_v2 buildReports) }
+
+setBuildLog_v2 :: PackageId -> BuildReportId -> Maybe BuildLog -> BuildReports_v2 -> Maybe BuildReports_v2
+setBuildLog_v2 pkgid reportId buildLog buildReports = case Map.lookup pkgid (reportsIndex_v2 buildReports) of
+    Nothing -> Nothing
+    Just pkgReports -> case Map.lookup reportId (reports_v2 pkgReports) of
+        Nothing -> Nothing
+        Just (rlog, _) -> let pkgReports' = pkgReports { reports_v2 = Map.insert reportId (rlog, buildLog) (reports_v2 pkgReports) }
+                         in Just $ buildReports { reportsIndex_v2 = Map.insert pkgid pkgReports' (reportsIndex_v2 buildReports) }

@@ -77,12 +77,12 @@ initBuildReportsFeature name env@ServerEnv{serverStateDir} = do
 
 reportsStateComponent :: String -> FilePath -> IO (StateComponent AcidState BuildReports)
 reportsStateComponent name stateDir = do
-  st  <- openLocalStateFrom (stateDir </> "db" </> name) initialBuildReports
+  st  <- openLocalStateFrom (stateDir </> "db" </> name) initialBuildReports_v3
   return StateComponent {
       stateDesc    = "Build reports"
     , stateHandle  = st
-    , getState     = query st GetBuildReports
-    , putState     = update st . ReplaceBuildReports
+    , getState     = query st GetBuildReports_v3
+    , putState     = update st . ReplaceBuildReports_v3
     , backupState  = \_ -> dumpBackup
     , restoreState = restoreBackup
     , resetState   = reportsStateComponent name
@@ -168,14 +168,14 @@ buildReportsFeature name
       pkgid <- packageInPath dpath
       guardValidPackageId pkgid
       reportId <- reportIdInPath dpath
-      mreport  <- queryState reportsState $ LookupReport pkgid reportId
+      mreport  <- queryState reportsState $ LookupReport_v3 pkgid reportId
       case mreport of
         Nothing -> errNotFound "Report not found" [MText "Build report does not exist"]
         Just (report, mlog, covg) -> return (reportId, report, mlog, covg)
 
     queryPackageReports :: MonadIO m => PackageId -> m [(BuildReportId, BuildReport)]
     queryPackageReports pkgid = do
-        reports <- queryState reportsState $ LookupPackageReports pkgid
+        reports <- queryState reportsState $ LookupPackageReports_v3 pkgid
         return $ map (\(a, (b, _, _)) -> (a,b)) reports
 
     queryBuildLog :: MonadIO m => BuildLog -> m Resource.BuildLog
@@ -220,7 +220,7 @@ buildReportsFeature name
                   -- Check that the submitter can actually upload docs
                   guardAuthorisedAsMaintainerOrTrustee (packageName pkgid)
               report' <- liftIO $ BuildReport.affixTimestamp report
-              reportId <- updateState reportsState $ AddReport pkgid (report', Nothing, Nothing)
+              reportId <- updateState reportsState $ AddReport_v3 pkgid (report', Nothing, Nothing)
               -- redirect to new reports page
               seeOther (reportsPageUri reportsResource "" pkgid reportId) $ toResponse ()
 
@@ -241,7 +241,7 @@ buildReportsFeature name
       guardValidPackageId pkgid
       reportId <- reportIdInPath dpath
       guardAuthorised_ [InGroup trusteesGroup]
-      success <- updateState reportsState $ DeleteReport pkgid reportId
+      success <- updateState reportsState $ DeleteReport_v3 pkgid reportId
       if success
           then seeOther (reportsListUri reportsResource "" pkgid) $ toResponse ()
           else errNotFound "Build report not found" [MText $ "Build report #" ++ display reportId ++ " not found"]
@@ -255,7 +255,7 @@ buildReportsFeature name
       guardAuthorised_ [AnyKnownUser]
       blogbody <- expectTextPlain
       buildLog <- liftIO $ BlobStorage.add store blogbody
-      void $ updateState reportsState $ SetBuildLog pkgid reportId (Just $ BuildLog buildLog)
+      void $ updateState reportsState $ SetBuildLog_v3 pkgid reportId (Just $ BuildLog buildLog)
       noContent (toResponse ())
 
     {-
@@ -274,7 +274,7 @@ buildReportsFeature name
       guardValidPackageId pkgid
       reportId <- reportIdInPath dpath
       guardAuthorised_ [InGroup trusteesGroup]
-      void $ updateState reportsState $ SetBuildLog pkgid reportId Nothing
+      void $ updateState reportsState $ SetBuildLog_v3 pkgid reportId Nothing
       noContent (toResponse ())
 
     putAllReports :: DynamicPath -> ServerPartE Response
@@ -297,7 +297,7 @@ buildReportsFeature name
               logBlob   <- liftIO $ traverse (\x -> BlobStorage.add store $ fromString x) logBody
               covgBlob  <- liftIO $ traverse (\x -> BlobStorage.add store $ fromString x) covgBody
               reportId  <- updateState reportsState $ 
-                                  AddReport pkgid (report', (fmap BuildLog logBlob), (fmap BuildCovg covgBlob))
+                                  AddReport_v3 pkgid (report', (fmap BuildLog logBlob), (fmap BuildCovg covgBlob))
               -- redirect to new reports page
               seeOther (reportsPageUri reportsResource "" pkgid reportId) $ toResponse ()
 
